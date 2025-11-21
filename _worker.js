@@ -78,7 +78,6 @@ async function handleMondayWrite(req, env) {
   // Defaults
   const department = "Fingerprint";
   const departmentEmail = "livescan@secureone.com";
-  const emailStatus = S(body.emailStatus || "Not Sent");
 
   // ---- Normalize dateTime into YYYY-MM-DD ----
   const now = new Date();
