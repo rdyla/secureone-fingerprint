@@ -97,9 +97,34 @@ async function handleMondayWrite(req, env) {
   const emailStatus = S(body.emailStatus || "Not Sent");
 
   // If dateTime is blank, default to today's date (YYYY-MM-DD)
-  const now = new Date();
-  const defaultDate = now.toISOString().slice(0, 10);
-  const dateValue = dateTime || defaultDate;
+const dateTimeRaw = S(body.dateTime);
+
+// Default to today's date in YYYY-MM-DD (UTC)
+const now = new Date();
+const defaultDate = now.toISOString().slice(0, 10);
+
+function normalizeDateString(input, fallback) {
+  if (!input) return fallback;
+
+  // If it already looks like YYYY-MM-DD or YYYY-MM-DD HH:MM:SS, just pass it through
+  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input)) return input;
+
+  const d = new Date(input);
+  if (Number.isNaN(d.getTime())) {
+    return fallback;
+  }
+
+  const yyyy = d.getUTCFullYear();
+  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+  const dd = String(d.getUTCDate()).padStart(2, "0");
+
+  // If you want to include time as well, you could build "YYYY-MM-DD HH:MM:SS" here instead
+  return `${yyyy}-${mm}-${dd}`;
+}
+
+const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
+
 
   // ---- Build Monday columnValues object ----
   // Column IDs you provided:
