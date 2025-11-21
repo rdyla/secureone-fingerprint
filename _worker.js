@@ -1,8 +1,8 @@
-// _worker.js — Monday write proxy for Zoom Virtual Agent
+// _worker.js — Monday write proxy for Zoom Virtual Agent (Fingerprint flow)
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
 
-// Static board ID (never changes)
+// Static board ID
 const BOARD_ID = "9729411524";
 
 // Helper for safe JSON stringify in logs
@@ -25,20 +25,16 @@ export default {
     const url = new URL(req.url);
     const path = url.pathname;
 
-    // Only handle POST /monday/write
     if (req.method === "POST" && path === "/monday/write") {
       return handleMondayWrite(req, env);
     }
 
-    return new Response(
-      JSON.stringify({
+    return json(
+      {
         ok: false,
         message: "Not found",
-      }),
-      {
-        status: 404,
-        headers: { "Content-Type": "application/json" },
-      }
+      },
+      404
     );
   },
 };
@@ -68,22 +64,10 @@ async function handleMondayWrite(req, env) {
     );
   }
 
-  // ---- Input payload from ZVA (or any client) ----
-  // Expecting something like:
-  // {
-  //   "name": "John Doe",
-  //   "dateTime": "2025-11-21T15:30:00-08:00",
-  //   "phone": "17145551212",
-  //   "email": "john@example.com",
-  //   "issue": "Fingerprint appointment question",
-  //   "division": "Arizona",
-  //   "callerId": "17145551212",
-  //   "zoomGuid": "abc-123-xyz"
-  // }
   const S = (v) => (v == null ? "" : String(v).trim());
 
   const name = S(body.name);
-  const dateTime = S(body.dateTime); // you can send either full datetime or date
+  const dateTimeRaw = S(body.dateTime);
   const phone = S(body.phone);
   const email = S(body.email);
   const issue = S(body.issue);
@@ -91,72 +75,118 @@ async function handleMondayWrite(req, env) {
   const callerId = S(body.callerId);
   const zoomGuid = S(body.zoomGuid);
 
-  // Defaults / constants per your spec
+  // Defaults
   const department = "Fingerprint";
   const departmentEmail = "livescan@secureone.com";
   const emailStatus = S(body.emailStatus || "Not Sent");
 
-  // If dateTime is blank, default to today's date (YYYY-MM-DD)
-const dateTimeRaw = S(body.dateTime);
+  // ---- Normalize dateTime into YYYY-MM-DD ----
+  const now = new Date();
+  const defaultDate = now.toISOString().slice(0, 10);
 
-// Default to today's date in YYYY-MM-DD (UTC)
-const now = new Date();
-const defaultDate = now.toISOString().slice(0, 10);
+  function normalizeDateString(input, fallback) {
+    if (!input) return fallback;
 
-function normalizeDateString(input, fallback) {
-  if (!input) return fallback;
+    if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
+    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input)) return input;
 
-  // If it already looks like YYYY-MM-DD or YYYY-MM-DD HH:MM:SS, just pass it through
-  if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-  if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input)) return input;
+    const d = new Date(input);
+    if (Number.isNaN(d.getTime())) return fallback;
 
-  const d = new Date(input);
-  if (Number.isNaN(d.getTime())) {
-    return fallback;
+    const yyyy = d.getUTCFullYear();
+    const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
+    const dd = String(d.getUTCDate()).padStart(2, "0");
+
+    return `${yyyy}-${mm}-${dd}`;
   }
 
-  const yyyy = d.getUTCFullYear();
-  const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
-  const dd = String(d.getUTCDate()).padStart(2, "0");
+  const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
 
-  // If you want to include time as well, you could build "YYYY-MM-DD HH:MM:SS" here instead
-  return `${yyyy}-${mm}-${dd}`;
-}
-
-const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
-
-
-  // ---- Build Monday columnValues object ----
-  // Column IDs you provided:
-  //  name                  → "name"
-  //  Date/Time:            → "date4"
-  //  Phone Number:         → "phone_mktdphra"
-  //  Email Address:        → "email_mktdyt3z"
-  //  Call Issue/Reason:    → "text_mktdb8pg"
-  //  Division:             → "color_mktd81zp"
-  //  Department:           → "color_mktsk31h"
-  //  Department Email:     → "text_mkv07gad"
-  //  Email Status:         → "color_mkv0cpxc"
-  //  Caller ID:            → "phone_mkv0p9q3"
-  //  Item ID:              → "pulse_id_mkv6rhgy"  (we'll leave for now or fill later)
-  //  Zoom Call GUID:       → "text_mkv7j2fq"
+  // ---- Build Monday columnValues with correct structures ----
+  // name                → text
+  // date4               → date (YYYY-MM-DD)
+  // phone_mktdphra      → phone
+  // email_mktdyt3z      → email
+  // text_mktdb8pg       → text
+  // color_mktd81zp      → status/color
+  // color_mktsk31h      → status/color
+  // text_mkv07gad       → text
+  // color_mkv0cpxc      → status/color
+  // phone_mkv0p9q3      → phone
+  // text_mkv7j2fq       → text
 
   const columnValues = {
+    // Name
     name: name || "Unknown caller",
+
+    // Date
     date4: dateValue,
-    phone_mktdphra: phone,
-    email_mktdyt3z: email,
-    text_mktdb8pg: issue,
-    color_mktd81zp: division,
-    color_mktsk31h: department,
+
+    // Phone Number (if provided)
+    ...(phone && {
+      phone_mktdphra: {
+        phone,
+        countryShortName: "",
+      },
+    }),
+
+    // Email Address (if provided)
+    ...(email && {
+      email_mktdyt3z: {
+        email,
+        text: email,
+      },
+    }),
+
+    // Call Issue/Reason
+    ...(issue && {
+      text_mktdb8pg: issue,
+    }),
+
+    // Division
+    ...(division && {
+      color_mktd81zp: {
+        label: division, // must match an existing label like "Arizona"
+      },
+    }),
+
+    // Department
+    color_mktsk31h: {
+      label: department, // "Fingerprint"
+    },
+
+    // Department Email
     text_mkv07gad: departmentEmail,
-    color_mkv0cpxc: emailStatus,
-    phone_mkv0p9q3: callerId,
-    // pulse_id_mkv6rhgy: ""   // you may fill this later with a second mutation using the created item ID
-    text_mkv7j2fq: zoomGuid,
+
+    // Email Status
+    ...(emailStatus && {
+      color_mkv0cpxc: {
+        label: emailStatus, // must match an existing status label like "Not Sent"
+      },
+    }),
+
+    // Caller ID
+    ...(callerId && {
+      phone_mkv0p9q3: {
+        phone: callerId,
+        countryShortName: "",
+      },
+    }),
+
+    // Zoom Call GUID
+    ...(zoomGuid && {
+      text_mkv7j2fq: zoomGuid,
+    }),
   };
 
-  // ---- Monday GraphQL mutation ----
+  // Remove empty values
+  const cleanedColumnValues = {};
+  for (const [key, value] of Object.entries(columnValues)) {
+    if (value !== undefined && value !== null && value !== "") {
+      cleanedColumnValues[key] = value;
+    }
+  }
+
   const graphqlQuery = `
     mutation ($boardId: ID!, $itemName: String!, $columnValues: JSON!) {
       create_item(
@@ -182,16 +212,10 @@ const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
   const variables = {
     boardId: BOARD_ID,
     itemName,
-    columnValues: JSON.stringify(columnValues),
+    columnValues: JSON.stringify(cleanedColumnValues),
   };
 
-  const payload = {
-    query: graphqlQuery,
-    variables,
-  };
-
-  // Optional debug (does NOT log the API key)
-  console.log("[MONDAY_WORKER] request variables:", D(variables));
+  console.log("[MONDAY_WORKER] variables:", D(variables));
 
   let mondayRes;
   try {
@@ -202,7 +226,10 @@ const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
         Authorization: env.MONDAY_API_KEY,
         "API-Version": "2023-10",
       },
-      body: JSON.stringify(payload),
+      body: JSON.stringify({
+        query: graphqlQuery,
+        variables,
+      }),
     });
   } catch (e) {
     console.error("[MONDAY_WORKER] fetch error:", e);
@@ -257,14 +284,13 @@ const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
       boardId: BOARD_ID,
       mondayItemId: itemId,
       mondayItemName: itemNameOut,
-      columnValuesSent: columnValues,
+      columnValuesSent: cleanedColumnValues,
       mondayRaw: data,
     },
     200
   );
 }
 
-// Small helper to return JSON Responses
 function json(obj, status = 200) {
   return new Response(JSON.stringify(obj), {
     status,
