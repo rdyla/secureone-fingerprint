@@ -17,6 +17,15 @@ const D = (o) => {
   }
 };
 
+// ---- helper: wrap response so we can log it ----
+function respond(obj, status = 200) {
+  console.log("[MONDAY_WORKER] RETURNING →", D({ status, ...obj }));
+  return new Response(JSON.stringify(obj), {
+    status,
+    headers: { "Content-Type": "application/json" },
+  });
+}
+
 export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
@@ -26,13 +35,13 @@ export default {
       return handleMondayWrite(req, env);
     }
 
-    return json({ ok: false, message: "Not found" }, 404);
+    return respond({ ok: false, message: "Not found" }, 404);
   },
 };
 
 async function handleMondayWrite(req, env) {
   if (!env.MONDAY_API_KEY) {
-    return json(
+    return respond(
       { ok: false, message: "MONDAY_API_KEY env var is not set on the Worker." },
       500
     );
@@ -42,7 +51,7 @@ async function handleMondayWrite(req, env) {
   try {
     body = await req.json();
   } catch (e) {
-    return json(
+    return respond(
       {
         ok: false,
         message: "Invalid JSON body.",
@@ -52,7 +61,7 @@ async function handleMondayWrite(req, env) {
     );
   }
 
-  // Unwrap ZVA-style nesting (headers/body or json/data)
+  // Unwrap ZVA-style nesting
   if (body && typeof body === "object") {
     if (body.json && typeof body.json === "object") {
       body = body.json;
@@ -85,104 +94,50 @@ async function handleMondayWrite(req, env) {
   const department = "Fingerprint";
   const departmentEmail = "livescan@secureone.com";
 
-  // ---- Normalize dateTime into YYYY-MM-DD ----
+  // ---- date normalization ----
   const now = new Date();
   const defaultDate = now.toISOString().slice(0, 10);
 
   function normalizeDateString(input, fallback) {
     if (!input) return fallback;
-
-    if (/^\d{4}-\d{2}-\d{2}$/.test(input)) return input;
-    if (/^\d{4}-\d{2}-\d{2} \d{2}:\d{2}:\d{2}$/.test(input)) return input;
-
     const d = new Date(input);
     if (Number.isNaN(d.getTime())) return fallback;
-
     const yyyy = d.getUTCFullYear();
     const mm = String(d.getUTCMonth() + 1).padStart(2, "0");
     const dd = String(d.getUTCDate()).padStart(2, "0");
-
     return `${yyyy}-${mm}-${dd}`;
   }
 
   const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
 
-  // ---- Normalize phone numbers for Monday phone columns ----
+  // ---- phone normalization ----
   function normalizePhone(raw) {
     const s = S(raw);
     if (!s) return null;
-
-    // Strip everything that's not a digit
     let digits = s.replace(/[^\d]/g, "");
     if (!digits) return null;
-
-    // Basic US handling: drop leading 1 for 11-digit NANP numbers
-    if (digits.length === 11 && digits.startsWith("1")) {
-      digits = digits.slice(1);
-    }
-
-    // If it's not at least 7 digits after normalization, consider it invalid
+    if (digits.length === 11 && digits.startsWith("1")) digits = digits.slice(1);
     if (digits.length < 7) return null;
-
-    return {
-      phone: digits,
-      countryShortName: "US",
-    };
+    return { phone: digits, countryShortName: "US" };
   }
 
   const normalizedMainPhone = normalizePhone(phone);
   const normalizedCallerId = normalizePhone(callerId);
 
-  // ---- Build Monday columnValues ----
+  // ---- Build Monday columns ----
   const columnValues = {
-    // Name (text)
     name: name || "Unknown caller",
-
-    // Date (date column)
     date4: dateValue,
-
-    // Phone Number (phone column)
-    ...(normalizedMainPhone && {
-      phone_mktdphra: normalizedMainPhone,
-    }),
-
-    // Email Address (email column)
+    ...(normalizedMainPhone && { phone_mktdphra: normalizedMainPhone }),
     ...(email && {
-      email_mktdyt3z: {
-        email,
-        text: email,
-      },
+      email_mktdyt3z: { email, text: email },
     }),
-
-    // Call Issue/Reason (text)
-    ...(issue && {
-      text_mktdb8pg: issue,
-    }),
-
-    // Division (status/color)
-    ...(division && {
-      color_mktd81zp: {
-        label: division,
-      },
-    }),
-
-    // Department (status/color)
-    color_mktsk31h: {
-      label: department,
-    },
-
-    // Department Email (text)
+    ...(issue && { text_mktdb8pg: issue }),
+    ...(division && { color_mktd81zp: { label: division } }),
+    color_mktsk31h: { label: "Fingerprint" },
     text_mkv07gad: departmentEmail,
-
-    // Caller ID (phone column)
-    ...(normalizedCallerId && {
-      phone_mkv0p9q3: normalizedCallerId,
-    }),
-
-    // Zoom Call GUID (text)
-    ...(zoomGuid && {
-      text_mkv7j2fq: zoomGuid,
-    }),
+    ...(normalizedCallerId && { phone_mkv0p9q3: normalizedCallerId }),
+    ...(zoomGuid && { text_mkv7j2fq: zoomGuid }),
   };
 
   const cleanedColumnValues = {};
@@ -209,17 +164,18 @@ async function handleMondayWrite(req, env) {
     }
   `;
 
-  // 🔹 Item name = caller's full name only
+  // ✔ itemName = caller name only
   const itemName = name || "Zoom Virtual Agent Call";
 
   const variables = {
     boardId: BOARD_ID,
-    itemName, // must be called itemName to match the GraphQL mutation
+    itemName,
     columnValues: JSON.stringify(cleanedColumnValues),
   };
 
   console.log("[MONDAY_WORKER] variables:", D(variables));
 
+  // ---- Monday API call ----
   let mondayRes;
   try {
     mondayRes = await fetch(MONDAY_API_URL, {
@@ -229,14 +185,10 @@ async function handleMondayWrite(req, env) {
         Authorization: env.MONDAY_API_KEY,
         "API-Version": "2023-10",
       },
-      body: JSON.stringify({
-        query: graphqlQuery,
-        variables,
-      }),
+      body: JSON.stringify({ query: graphqlQuery, variables }),
     });
   } catch (e) {
-    console.error("[MONDAY_WORKER] fetch error:", e);
-    return json(
+    return respond(
       {
         ok: false,
         message: "Network error calling Monday.com",
@@ -251,8 +203,7 @@ async function handleMondayWrite(req, env) {
   try {
     data = text ? JSON.parse(text) : null;
   } catch (e) {
-    console.error("[MONDAY_WORKER] Non-JSON response:", text);
-    return json(
+    return respond(
       {
         ok: false,
         message: "Non-JSON response from Monday.com",
@@ -263,9 +214,9 @@ async function handleMondayWrite(req, env) {
     );
   }
 
+  // ---- Monday says error ----
   if (!mondayRes.ok || data.error || data.errors) {
-    console.error("[MONDAY_WORKER] Monday error:", D(data));
-    return json(
+    return respond(
       {
         ok: false,
         message: "Monday.com returned an error",
@@ -276,11 +227,12 @@ async function handleMondayWrite(req, env) {
     );
   }
 
+  // ---- OK ----
   const created = data?.data?.create_item || {};
   const itemId = created.id || "";
   const itemNameOut = created.name || "";
 
-  return json(
+  return respond(
     {
       ok: true,
       message: "Monday item created successfully.",
@@ -292,13 +244,4 @@ async function handleMondayWrite(req, env) {
     },
     200
   );
-}
-
-function json(obj, status = 200) {
-  return new Response(JSON.stringify(obj), {
-    status,
-    headers: {
-      "Content-Type": "application/json",
-    },
-  });
 }
