@@ -88,6 +88,20 @@ async function handleMondayWrite(req, env) {
   const email = S(body.email);
   const issue = S(body.issue);
   const division = S(body.division);
+
+    // ---- Division validation ----
+  const validDivisions = new Set([
+    "Arizona",
+    "Illinois",
+    "Alabama",
+    "Texas",
+    "Ohio",
+    "Tennessee",
+    "Indiana",
+  ]);
+
+  let divisionLabel = validDivisions.has(division) ? division : "Other";
+  
   const callerId = S(body.callerId);
   const zoomGuid = S(body.zoomGuid);
 
@@ -133,7 +147,7 @@ async function handleMondayWrite(req, env) {
       email_mktdyt3z: { email, text: email },
     }),
     ...(issue && { text_mktdb8pg: issue }),
-    ...(division && { color_mktd81zp: { label: division } }),
+    ...(division && { color_mktd81zp: { label: divisionLabel } }),
     color_mktsk31h: { label: "Fingerprint" },
     text_mkv07gad: departmentEmail,
     ...(normalizedCallerId && { phone_mkv0p9q3: normalizedCallerId }),
