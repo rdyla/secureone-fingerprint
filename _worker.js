@@ -210,14 +210,12 @@ async function handleMondayWrite(req, env) {
     }
   `;
 
-  const itemName =
-    name && issue
-      ? `${name} – ${issue}`
-      : name || "Zoom Virtual Agent Call";
+  // const itemName =
+  //   name ? `${name}` : name || "Zoom Virtual Agent Call";
 
   const variables = {
     boardId: BOARD_ID,
-    itemName,
+    name,
     columnValues: JSON.stringify(cleanedColumnValues),
   };
 
