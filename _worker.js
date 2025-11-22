@@ -52,14 +52,13 @@ async function handleMondayWrite(req, env) {
     );
   }
 
-  // 🔑 Unwrap ZVA-style nesting
+  // Unwrap ZVA-style nesting (headers/body or json/data)
   if (body && typeof body === "object") {
     if (body.json && typeof body.json === "object") {
       body = body.json;
     } else if (body.data && typeof body.data === "object") {
       body = body.data;
     } else if (typeof body.body === "string") {
-      // This is what your ZVA is sending: { headers: {...}, body: "JSON STRING" }
       try {
         body = JSON.parse(body.body);
       } catch (e) {
@@ -108,18 +107,47 @@ async function handleMondayWrite(req, env) {
 
   const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
 
+  // ---- Normalize phone numbers for Monday phone columns ----
+  function normalizePhone(raw) {
+    const s = S(raw);
+    if (!s) return null;
+
+    // Strip everything that's not a digit
+    let digits = s.replace(/[^\d]/g, "");
+    if (!digits) return null;
+
+    // Basic US handling: drop leading 1 for 11-digit NANP numbers
+    if (digits.length === 11 && digits.startsWith("1")) {
+      digits = digits.slice(1);
+    }
+
+    // If it's not at least 7 digits after normalization, consider it invalid
+    if (digits.length < 7) return null;
+
+    // You can get fancier here (E.164, etc.), but this should satisfy Monday
+    return {
+      phone: digits,
+      countryShortName: "US",
+    };
+  }
+
+  const normalizedMainPhone = normalizePhone(phone);
+  const normalizedCallerId = normalizePhone(callerId);
+
   // ---- Build Monday columnValues ----
   const columnValues = {
+    // Name (text)
     name: name || "Unknown caller",
+
+    // Date (date column)
     date4: dateValue,
 
-    ...(phone && {
-      phone_mktdphra: {
-        phone,
-        countryShortName: "",
-      },
+    // Phone Number (phone column)
+    ...(normalizedMainPhone && {
+      phone_mktdphra: normalizedMainPhone,
     }),
 
+    // Email Address (email column)
     ...(email && {
       email_mktdyt3z: {
         email,
@@ -127,29 +155,32 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
+    // Call Issue/Reason (text)
     ...(issue && {
       text_mktdb8pg: issue,
     }),
 
+    // Division (status/color)
     ...(division && {
       color_mktd81zp: {
-        label: division,
+        label: division, // must match existing label like "Arizona"
       },
     }),
 
+    // Department (status/color)
     color_mktsk31h: {
       label: department,
     },
 
+    // Department Email (text)
     text_mkv07gad: departmentEmail,
 
-    ...(callerId && {
-      phone_mkv0p9q3: {
-        phone: callerId,
-        countryShortName: "",
-      },
+    // Caller ID (phone column)
+    ...(normalizedCallerId && {
+      phone_mkv0p9q3: normalizedCallerId,
     }),
 
+    // Zoom Call GUID (text)
     ...(zoomGuid && {
       text_mkv7j2fq: zoomGuid,
     }),
