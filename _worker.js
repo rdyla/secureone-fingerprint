@@ -1,7 +1,7 @@
 // _worker.js — Monday write proxy for Zoom Virtual Agent (Fingerprint flow)
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
-const BOARD_ID = "9729411524"; // static board
+const BOARD_ID = "9729411524";
 
 const D = (o) => {
   try {
@@ -26,10 +26,7 @@ export default {
       return handleMondayWrite(req, env);
     }
 
-    return json(
-      { ok: false, message: "Not found" },
-      404
-    );
+    return json({ ok: false, message: "Not found" }, 404);
   },
 };
 
@@ -55,12 +52,21 @@ async function handleMondayWrite(req, env) {
     );
   }
 
-  // 🔑 IMPORTANT: unwrap ZVA-style nesting (body.json / body.data)
+  // 🔑 Unwrap ZVA-style nesting
   if (body && typeof body === "object") {
     if (body.json && typeof body.json === "object") {
       body = body.json;
     } else if (body.data && typeof body.data === "object") {
       body = body.data;
+    } else if (typeof body.body === "string") {
+      // This is what your ZVA is sending: { headers: {...}, body: "JSON STRING" }
+      try {
+        body = JSON.parse(body.body);
+      } catch (e) {
+        console.error("[MONDAY_WORKER] Failed to parse body.body:", body.body);
+      }
+    } else if (body.body && typeof body.body === "object") {
+      body = body.body;
     }
   }
 
@@ -102,15 +108,11 @@ async function handleMondayWrite(req, env) {
 
   const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
 
-  // ---- Build Monday columnValues with correct structures ----
+  // ---- Build Monday columnValues ----
   const columnValues = {
-    // Name (text)
     name: name || "Unknown caller",
-
-    // Date (date column)
     date4: dateValue,
 
-    // Phone Number (phone column)
     ...(phone && {
       phone_mktdphra: {
         phone,
@@ -118,7 +120,6 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
-    // Email Address (email column)
     ...(email && {
       email_mktdyt3z: {
         email,
@@ -126,27 +127,22 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
-    // Call Issue/Reason (text)
     ...(issue && {
       text_mktdb8pg: issue,
     }),
 
-    // Division (status/color)
     ...(division && {
       color_mktd81zp: {
-        label: division, // must match an existing label like "Arizona"
+        label: division,
       },
     }),
 
-    // Department (status/color)
     color_mktsk31h: {
-      label: department, // "Fingerprint"
+      label: department,
     },
 
-    // Department Email (text)
     text_mkv07gad: departmentEmail,
 
-    // Caller ID (phone column)
     ...(callerId && {
       phone_mkv0p9q3: {
         phone: callerId,
@@ -154,13 +150,11 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
-    // Zoom Call GUID (text)
     ...(zoomGuid && {
       text_mkv7j2fq: zoomGuid,
     }),
   };
 
-  // Remove empty values
   const cleanedColumnValues = {};
   for (const [key, value] of Object.entries(columnValues)) {
     if (value !== undefined && value !== null && value !== "") {
