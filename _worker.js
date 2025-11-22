@@ -2,6 +2,11 @@
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
 const BOARD_ID = "9729411524";
+const CORS_HEADERS = {
+  "Access-Control-Allow-Origin": "*",
+  "Access-Control-Allow-Headers": "Content-Type, Authorization",
+  "Access-Control-Allow-Methods": "GET, POST, OPTIONS",
+};
 
 const D = (o) => {
   try {
@@ -22,7 +27,7 @@ function respond(obj, status = 200) {
   console.log("[MONDAY_WORKER] RETURNING →", D({ status, ...obj }));
   return new Response(JSON.stringify(obj), {
     status,
-    headers: { "Content-Type": "application/json" },
+    headers: { "Content-Type": "application/json", ...CORS_HEADERS },
   });
 }
 
@@ -30,6 +35,14 @@ export default {
   async fetch(req, env, ctx) {
     const url = new URL(req.url);
     const path = url.pathname;
+
+    if (req.method === "OPTIONS") {
+      return new Response(null, { status: 204, headers: CORS_HEADERS });
+    }
+
+    if (req.method === "GET" && path === "/health") {
+      return respond({ ok: true, message: "Monday write worker live" });
+    }
 
     if (req.method === "POST" && path === "/monday/write") {
       return handleMondayWrite(req, env);
