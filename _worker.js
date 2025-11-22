@@ -124,7 +124,6 @@ async function handleMondayWrite(req, env) {
     // If it's not at least 7 digits after normalization, consider it invalid
     if (digits.length < 7) return null;
 
-    // You can get fancier here (E.164, etc.), but this should satisfy Monday
     return {
       phone: digits,
       countryShortName: "US",
@@ -163,7 +162,7 @@ async function handleMondayWrite(req, env) {
     // Division (status/color)
     ...(division && {
       color_mktd81zp: {
-        label: division, // must match existing label like "Arizona"
+        label: division,
       },
     }),
 
@@ -210,12 +209,12 @@ async function handleMondayWrite(req, env) {
     }
   `;
 
-  // const itemName =
-  //   name ? `${name}` : name || "Zoom Virtual Agent Call";
+  // 🔹 Item name = caller's full name only
+  const itemName = name || "Zoom Virtual Agent Call";
 
   const variables = {
     boardId: BOARD_ID,
-    name,
+    itemName, // must be called itemName to match the GraphQL mutation
     columnValues: JSON.stringify(cleanedColumnValues),
   };
 
