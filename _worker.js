@@ -102,26 +102,14 @@ async function handleMondayWrite(req, env) {
   const dateValue = normalizeDateString(dateTimeRaw, defaultDate);
 
   // ---- Build Monday columnValues with correct structures ----
-  // name                → text
-  // date4               → date (YYYY-MM-DD)
-  // phone_mktdphra      → phone
-  // email_mktdyt3z      → email
-  // text_mktdb8pg       → text
-  // color_mktd81zp      → status/color
-  // color_mktsk31h      → status/color
-  // text_mkv07gad       → text
-  // color_mkv0cpxc      → status/color
-  // phone_mkv0p9q3      → phone
-  // text_mkv7j2fq       → text
-
   const columnValues = {
-    // Name
+    // Name (text)
     name: name || "Unknown caller",
 
-    // Date
+    // Date (date column)
     date4: dateValue,
 
-    // Phone Number (if provided)
+    // Phone Number (phone column)
     ...(phone && {
       phone_mktdphra: {
         phone,
@@ -129,7 +117,7 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
-    // Email Address (if provided)
+    // Email Address (email column)
     ...(email && {
       email_mktdyt3z: {
         email,
@@ -137,34 +125,27 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
-    // Call Issue/Reason
+    // Call Issue/Reason (text)
     ...(issue && {
       text_mktdb8pg: issue,
     }),
 
-    // Division
+    // Division (status/color)
     ...(division && {
       color_mktd81zp: {
-        label: division, // must match an existing label like "Arizona"
+        label: division, // must match an existing label
       },
     }),
 
-    // Department
+    // Department (status/color)
     color_mktsk31h: {
       label: department, // "Fingerprint"
     },
 
-    // Department Email
+    // Department Email (text)
     text_mkv07gad: departmentEmail,
 
-    // Email Status
-    ...(emailStatus && {
-      color_mkv0cpxc: {
-        label: emailStatus, // must match an existing status label like "Not Sent"
-      },
-    }),
-
-    // Caller ID
+    // Caller ID (phone column)
     ...(callerId && {
       phone_mkv0p9q3: {
         phone: callerId,
@@ -172,7 +153,7 @@ async function handleMondayWrite(req, env) {
       },
     }),
 
-    // Zoom Call GUID
+    // Zoom Call GUID (text)
     ...(zoomGuid && {
       text_mkv7j2fq: zoomGuid,
     }),
