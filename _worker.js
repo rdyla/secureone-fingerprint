@@ -1,11 +1,8 @@
 // _worker.js — Monday write proxy for Zoom Virtual Agent (Fingerprint flow)
 
 const MONDAY_API_URL = "https://api.monday.com/v2";
+const BOARD_ID = "9729411524"; // static board
 
-// Static board ID
-const BOARD_ID = "9729411524";
-
-// Helper for safe JSON stringify in logs
 const D = (o) => {
   try {
     return JSON.stringify(
@@ -30,10 +27,7 @@ export default {
     }
 
     return json(
-      {
-        ok: false,
-        message: "Not found",
-      },
+      { ok: false, message: "Not found" },
       404
     );
   },
@@ -42,10 +36,7 @@ export default {
 async function handleMondayWrite(req, env) {
   if (!env.MONDAY_API_KEY) {
     return json(
-      {
-        ok: false,
-        message: "MONDAY_API_KEY env var is not set on the Worker.",
-      },
+      { ok: false, message: "MONDAY_API_KEY env var is not set on the Worker." },
       500
     );
   }
@@ -64,6 +55,17 @@ async function handleMondayWrite(req, env) {
     );
   }
 
+  // 🔑 IMPORTANT: unwrap ZVA-style nesting (body.json / body.data)
+  if (body && typeof body === "object") {
+    if (body.json && typeof body.json === "object") {
+      body = body.json;
+    } else if (body.data && typeof body.data === "object") {
+      body = body.data;
+    }
+  }
+
+  console.log("[MONDAY_WORKER] raw body after unwrap:", D(body));
+
   const S = (v) => (v == null ? "" : String(v).trim());
 
   const name = S(body.name);
@@ -75,7 +77,6 @@ async function handleMondayWrite(req, env) {
   const callerId = S(body.callerId);
   const zoomGuid = S(body.zoomGuid);
 
-  // Defaults
   const department = "Fingerprint";
   const departmentEmail = "livescan@secureone.com";
 
@@ -133,7 +134,7 @@ async function handleMondayWrite(req, env) {
     // Division (status/color)
     ...(division && {
       color_mktd81zp: {
-        label: division, // must match an existing label
+        label: division, // must match an existing label like "Arizona"
       },
     }),
 
